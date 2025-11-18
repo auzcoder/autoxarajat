@@ -130,7 +130,8 @@ class AutoXApp extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: box.listenable(),
       builder: (context, Box<dynamic> box, _) {
-        final themeString = box.get('themeMode', defaultValue: 'system') as String;
+        final themeString =
+            box.get('themeMode', defaultValue: 'system') as String;
         final themeMode = switch (themeString) {
           'light' => ThemeMode.light,
           'dark' => ThemeMode.dark,
@@ -299,7 +300,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   String get _finalCarModel {
     if (_selectedCar == 'Boshqa (o‘zim kiritaman)') {
-      return _customCarCtrl.text.trim().isEmpty ? 'Mening avtomobilim' : _customCarCtrl.text.trim();
+      return _customCarCtrl.text.trim().isEmpty
+          ? 'Mening avtomobilim'
+          : _customCarCtrl.text.trim();
     }
     return _selectedCar;
   }
@@ -309,10 +312,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     final profile = AppProfile(
       id: 'profile_1',
-      name: _nameCtrl.text.trim().isEmpty ? 'Haydovchi' : _nameCtrl.text.trim(),
+      name: _nameCtrl.text.trim().isEmpty
+          ? 'Haydovchi'
+          : _nameCtrl.text.trim(),
       carModel: _finalCarModel,
       fuelType: _fuelType,
-      plateNumber: _plateCtrl.text.trim().isEmpty ? null : _plateCtrl.text.trim(),
+      plateNumber:
+          _plateCtrl.text.trim().isEmpty ? null : _plateCtrl.text.trim(),
       gasTankCapacity: _tankCapacity,
     );
 
@@ -330,6 +336,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
@@ -370,13 +377,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 padding: const EdgeInsets.all(18),
                 child: Row(
                   children: [
-                    const Icon(Icons.directions_car_filled_rounded,
-                        size: 42, color: Colors.white),
+                    const Icon(
+                      Icons.directions_car_filled_rounded,
+                      size: 42,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 16),
-                    Expanded(
+                    const Expanded(
                       child: Text(
                         'Boshlashdan oldin profil va avtomobil ma’lumotlarini kiriting. Keyin hamma hisob-kitoblarni biz qilib beramiz.',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
                           fontSize: 14,
                           height: 1.3,
@@ -710,12 +720,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final result = await showModalBottomSheet<RefuelEntry>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: AddEntrySheet(existing: existing),
-      ),
+      useSafeArea: true,
+      builder: (_) => AddEntrySheet(existing: existing),
     );
 
     if (result != null) {
@@ -751,10 +757,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final totalLiters = entries.fold<double>(0, (p, e) => p + e.liters);
         final totalCost = entries.fold<double>(0, (p, e) => p + e.totalCost);
 
-        final avgConsumption = entries
-            .map((e) => e.consumptionPer100)
-            .whereType<double>()
-            .toList();
+        final avgConsumption =
+            entries.map((e) => e.consumptionPer100).whereType<double>().toList();
         final avgCons = avgConsumption.isEmpty
             ? null
             : avgConsumption.reduce((a, b) => a + b) / avgConsumption.length;
@@ -822,9 +826,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
-                  color: isDark
-                      ? const Color(0xFF020617)
-                      : Colors.white,
+                  color:
+                      isDark ? const Color(0xFF020617) : Colors.white,
                   boxShadow: isDark
                       ? null
                       : [
@@ -1198,7 +1201,8 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
         double.parse(_priceCtrl.text.replaceAll(',', '.').trim());
 
     final entry = RefuelEntry(
-      id: widget.existing?.id ?? 'entry_${DateTime.now().millisecondsSinceEpoch}',
+      id: widget.existing?.id ??
+          'entry_${DateTime.now().millisecondsSinceEpoch}',
       date: _date,
       distanceKm: distance,
       liters: liters,
@@ -1212,166 +1216,175 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('dd.MM.yyyy');
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 36,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              color: Colors.grey.withOpacity(0.4),
-            ),
-          ),
-          Text(
-            widget.existing == null
-                ? 'Yangi yoqilg‘i yozuvi'
-                : 'Yozuvni tahrirlash',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _distanceCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Yurgan masofa (km)',
-                          prefixIcon: Icon(Icons.route),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Masofani kiriting';
-                          }
-                          final d = double.tryParse(
-                              v.replaceAll(',', '.').trim());
-                          if (d == null || d <= 0) {
-                            return 'To‘g‘ri km kiriting';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _litersCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Quyilgan litr',
-                          prefixIcon: Icon(Icons.local_gas_station),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Litrni kiriting';
-                          }
-                          final d = double.tryParse(
-                              v.replaceAll(',', '.').trim());
-                          if (d == null || d <= 0) {
-                            return 'To‘g‘ri litr kiriting';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                  ],
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 24),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: Colors.grey.withOpacity(0.4),
                 ),
-                const SizedBox(height: 12),
-                Row(
+              ),
+              Text(
+                widget.existing == null
+                    ? 'Yangi yoqilg‘i yozuvi'
+                    : 'Yozuvni tahrirlash',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Form(
+                key: _formKey,
+                child: Column(
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _priceCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: '1 litr narxi (so‘m)',
-                          prefixIcon: Icon(Icons.attach_money),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Narxni kiriting';
-                          }
-                          final d = double.tryParse(
-                              v.replaceAll(',', '.').trim());
-                          if (d == null || d <= 0) {
-                            return 'To‘g‘ri narx kiriting';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: InkWell(
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _date,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now().add(
-                              const Duration(days: 365),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _distanceCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                                    decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Yurgan masofa (km)',
+                              prefixIcon: Icon(Icons.route),
                             ),
-                          );
-                          if (picked != null) {
-                            setState(() {
-                              _date = picked;
-                            });
-                          }
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: 'Sana',
-                            prefixIcon: Icon(Icons.calendar_today),
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) {
+                                return 'Masofani kiriting';
+                              }
+                              final d = double.tryParse(
+                                  v.replaceAll(',', '.').trim());
+                              if (d == null || d <= 0) {
+                                return 'To‘g‘ri km kiriting';
+                              }
+                              return null;
+                            },
                           ),
-                          child: Text(df.format(_date)),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _litersCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                                    decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Quyilgan litr',
+                              prefixIcon: Icon(Icons.local_gas_station),
+                            ),
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) {
+                                return 'Litrni kiriting';
+                              }
+                              final d = double.tryParse(
+                                  v.replaceAll(',', '.').trim());
+                              if (d == null || d <= 0) {
+                                return 'To‘g‘ri litr kiriting';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _priceCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                                    decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: '1 litr narxi (so‘m)',
+                              prefixIcon: Icon(Icons.attach_money),
+                            ),
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) {
+                                return 'Narxni kiriting';
+                              }
+                              final d = double.tryParse(
+                                  v.replaceAll(',', '.').trim());
+                              if (d == null || d <= 0) {
+                                return 'To‘g‘ri narx kiriting';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _date,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime.now()
+                                    .add(const Duration(days: 365)),
+                              );
+                              if (picked != null) {
+                                setState(() {
+                                  _date = picked;
+                                });
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(16),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Sana',
+                                prefixIcon: Icon(Icons.calendar_today),
+                              ),
+                              child: Text(df.format(_date)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      value: _isFull,
+                      title: const Text('Full quyildi'),
+                      subtitle: const Text(
+                        'Agar balon to‘liq to‘ldirilgan bo‘lsa, yoqing – statistikada aniqroq hisob bo‘ladi.',
+                      ),
+                      onChanged: (v) {
+                        setState(() {
+                          _isFull = v;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _save,
+                        child: Text(
+                          widget.existing == null
+                              ? 'Saqlash'
+                              : 'O‘zgartirish',
                         ),
                       ),
-                    ),
+                    )
                   ],
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: _isFull,
-                  title: const Text('Full quyildi'),
-                  subtitle: const Text(
-                    'Agar balon to‘liq to‘ldirilgan bo‘lsa, yoqing – statistikada aniqroq hisob bo‘ladi.',
-                  ),
-                  onChanged: (v) {
-                    setState(() {
-                      _isFull = v;
-                    });
-                  },
-                ),
-                const SizedBox(height: 18),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _save,
-                    child: Text(widget.existing == null
-                        ? 'Saqlash'
-                        : 'O‘zgartirish'),
-                  ),
-                )
-              ],
-            ),
-          )
-        ],
+              )
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1402,8 +1415,7 @@ class AiAutoScreen extends StatelessWidget {
           .whereType<double>()
           .toList();
       if (consList.isNotEmpty) {
-        avgLPer100 =
-            consList.reduce((a, b) => a + b) / consList.length;
+        avgLPer100 = consList.reduce((a, b) => a + b) / consList.length;
         avgKmPerLiter = 100 / avgLPer100;
       }
 
@@ -1417,9 +1429,8 @@ class AiAutoScreen extends StatelessWidget {
     final totalDistance =
         entries.fold<double>(0, (p, e) => p + e.distanceKm);
 
-    final avgCostPerKm = totalDistance > 0
-        ? totalCost / totalDistance
-        : null;
+    final avgCostPerKm =
+        totalDistance > 0 ? totalCost / totalDistance : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1631,8 +1642,7 @@ class _StatsScreenState extends State<StatsScreen> {
       }
     }
 
-    final filtered =
-        entries.where((e) => inRange(e.date)).toList();
+    final filtered = entries.where((e) => inRange(e.date)).toList();
 
     // Chart uchun: vaqt bo‘yicha guruhlangan jami xarajat
     final Map<String, double> groupedCosts = {};
@@ -1647,9 +1657,8 @@ class _StatsScreenState extends State<StatsScreen> {
           key = DateFormat('dd.MM').format(e.date);
           break;
         case StatsRange.year:
-          key = DateFormat('MM.yyyy').format(
-            DateTime(e.date.year, e.date.month),
-          );
+          key = DateFormat('MM.yyyy')
+              .format(DateTime(e.date.year, e.date.month));
           break;
       }
 
@@ -1657,19 +1666,15 @@ class _StatsScreenState extends State<StatsScreen> {
     }
 
     final labels = groupedCosts.keys.toList()
-      ..sort((a, b) {
-        // Ko‘rinish tartibi
-        return a.compareTo(b);
-      });
+      ..sort((a, b) => a.compareTo(b));
 
     final totalCost =
         filtered.fold<double>(0, (p, e) => p + e.totalCost);
     final totalDistance =
         filtered.fold<double>(0, (p, e) => p + e.distanceKm);
 
-    final avgCostPerKm = totalDistance > 0
-        ? totalCost / totalDistance
-        : null;
+    final avgCostPerKm =
+        totalDistance > 0 ? totalCost / totalDistance : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1728,14 +1733,18 @@ class _StatsScreenState extends State<StatsScreen> {
                         ),
                       ],
                       titlesData: FlTitlesData(
-                        leftTitles:
-                            const AxisTitles(sideTitles: SideTitles(showTitles: true,
-                              reservedSize: 40,
-                            )),
-                        rightTitles:
-                            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        topTitles:
-                            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        leftTitles: const AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 40,
+                          ),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
@@ -1818,6 +1827,7 @@ class SettingsScreen extends StatelessWidget {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (_) => ProfileEditSheet(box: box),
     );
   }
@@ -1826,6 +1836,7 @@ class SettingsScreen extends StatelessWidget {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (_) => PinSetupSheet(box: box),
     );
   }
@@ -1833,7 +1844,8 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentTheme = box.get('themeMode', defaultValue: 'system') as String;
+    final currentTheme =
+        box.get('themeMode', defaultValue: 'system') as String;
     final lockEnabled = box.get('lockEnabled', defaultValue: false) as bool;
 
     return SingleChildScrollView(
@@ -1915,7 +1927,8 @@ class SettingsScreen extends StatelessWidget {
                 Text(
                   'Face ID / Touch ID ni ham keyingi bosqichda qo‘shsa bo‘ladi – hozircha oddiy PIN-lock bor.',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                    color:
+                        theme.textTheme.bodySmall?.color?.withOpacity(0.7),
                   ),
                 ),
               ],
@@ -1969,8 +1982,7 @@ class _ProfileEditSheetState extends State<ProfileEditSheet> {
 
   void _save() {
     final map = widget.box.get('profile') as Map<dynamic, dynamic>?;
-    final old =
-        map != null ? AppProfile.fromMap(map) : null;
+    final old = map != null ? AppProfile.fromMap(map) : null;
 
     final cap = _balonCtrl.text.trim().isEmpty
         ? null
@@ -1998,103 +2010,106 @@ class _ProfileEditSheetState extends State<ProfileEditSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                color: Colors.grey.withOpacity(0.4),
-              ),
-            ),
-            Text(
-              'Profil va mashina ma’lumotlari',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Ism',
-                prefixIcon: Icon(Icons.person),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _plateCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Davlat raqami',
-                prefixIcon: Icon(Icons.credit_card),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _carCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Avtomobil',
-                prefixIcon: Icon(Icons.directions_car),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Column(
-              children: [
-                RadioListTile<FuelType>(
-                  value: FuelType.petrol,
-                  groupValue: _fuelType,
-                  title: const Text('Faqat benzin'),
-                  onChanged: (v) => setState(() {
-                    _fuelType = v!;
-                  }),
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 24),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: Colors.grey.withOpacity(0.4),
                 ),
-                RadioListTile<FuelType>(
-                  value: FuelType.petrolLpg,
-                  groupValue: _fuelType,
-                  title: const Text('Benzin + Propan'),
-                  onChanged: (v) => setState(() {
-                    _fuelType = v!;
-                  }),
+              ),
+              Text(
+                'Profil va mashina ma’lumotlari',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Ism',
+                  prefixIcon: Icon(Icons.person),
                 ),
-                RadioListTile<FuelType>(
-                  value: FuelType.petrolCng,
-                  groupValue: _fuelType,
-                  title: const Text('Benzin + Metan'),
-                  onChanged: (v) => setState(() {
-                    _fuelType = v!;
-                  }),
-                ),
-              ],
-            ),
-            if (_fuelType != FuelType.petrol) ...[
+              ),
               const SizedBox(height: 8),
               TextField(
-                controller: _balonCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: _fuelType == FuelType.petrolLpg
-                      ? 'Propan balon (litr)'
-                      : 'Metan balon (m³ taxminiy)',
-                  prefixIcon: const Icon(Icons.local_gas_station),
+                controller: _plateCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Davlat raqami',
+                  prefixIcon: Icon(Icons.credit_card),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _carCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Avtomobil',
+                  prefixIcon: Icon(Icons.directions_car),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                children: [
+                  RadioListTile<FuelType>(
+                    value: FuelType.petrol,
+                    groupValue: _fuelType,
+                    title: const Text('Faqat benzin'),
+                    onChanged: (v) => setState(() {
+                      _fuelType = v!;
+                    }),
+                  ),
+                  RadioListTile<FuelType>(
+                    value: FuelType.petrolLpg,
+                    groupValue: _fuelType,
+                    title: const Text('Benzin + Propan'),
+                    onChanged: (v) => setState(() {
+                      _fuelType = v!;
+                    }),
+                  ),
+                  RadioListTile<FuelType>(
+                    value: FuelType.petrolCng,
+                    groupValue: _fuelType,
+                    title: const Text('Benzin + Metan'),
+                    onChanged: (v) => setState(() {
+                      _fuelType = v!;
+                    }),
+                  ),
+                ],
+              ),
+              if (_fuelType != FuelType.petrol) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _balonCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: _fuelType == FuelType.petrolLpg
+                        ? 'Propan balon (litr)'
+                        : 'Metan balon (m³ taxminiy)',
+                    prefixIcon: const Icon(Icons.local_gas_station),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _save,
+                  child: const Text('Saqlash'),
                 ),
               ),
             ],
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _save,
-                child: const Text('Saqlash'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2233,68 +2248,71 @@ class _PinSetupSheetState extends State<PinSetupSheet> {
   Widget build(BuildContext context) {
     final hasPin =
         (widget.box.get('lockPin') as String?)?.isNotEmpty == true;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 36,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              color: Colors.grey.withOpacity(0.4),
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: Colors.grey.withOpacity(0.4),
+              ),
             ),
-          ),
-          Text(
-            hasPin ? 'PIN ni o‘zgartirish' : 'PIN o‘rnatish',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+            Text(
+              hasPin ? 'PIN ni o‘zgartirish' : 'PIN o‘rnatish',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _pin1,
-            maxLength: 4,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Yangi PIN',
+            const SizedBox(height: 12),
+            TextField(
+              controller: _pin1,
+              maxLength: 4,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Yangi PIN',
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _pin2,
-            maxLength: 4,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Yangi PIN (takror)',
+            const SizedBox(height: 8),
+            TextField(
+              controller: _pin2,
+              maxLength: 4,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Yangi PIN (takror)',
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              if (hasPin)
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (hasPin)
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _disable,
+                      child: const Text('PINni o‘chirish'),
+                    ),
+                  ),
+                if (hasPin) const SizedBox(width: 8),
                 Expanded(
-                  child: OutlinedButton(
-                    onPressed: _disable,
-                    child: const Text('PINni o‘chirish'),
+                  child: FilledButton(
+                    onPressed: _save,
+                    child: const Text('Saqlash'),
                   ),
                 ),
-              if (hasPin) const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _save,
-                  child: const Text('Saqlash'),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
