@@ -1,24 +1,51 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
-void main() {
-  runApp(const AvtoXarajatApp());
+/// Sana formatlash: 18.11.2025 ko'rinishida
+String _formatDate(DateTime date) {
+  final day = date.day.toString().padLeft(2, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  final year = date.year.toString();
+  return '$day.$month.$year';
 }
 
-class AvtoXarajatApp extends StatelessWidget {
-  const AvtoXarajatApp({super.key});
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  runApp(const AutoXarajatApp());
+}
+
+class AutoXarajatApp extends StatefulWidget {
+  const AutoXarajatApp({super.key});
+
+  @override
+  State<AutoXarajatApp> createState() => _AutoXarajatAppState();
+}
+
+class _AutoXarajatAppState extends State<AutoXarajatApp> {
+  late final FuelRepository _repository;
+  late final Future<List<RefuelEntry>> _initialFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _repository = FuelRepository();
+    _initialFuture = _init();
+  }
+
+  Future<List<RefuelEntry>> _init() async {
+    await _repository.init();
+    return _repository.loadEntries();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF16a34a), // yashil brend rangi
-      brightness: Brightness.light,
+      seedColor: const Color(0xFF00A884),
+      brightness: Brightness.dark,
     );
 
     return MaterialApp(
@@ -27,568 +54,435 @@ class AvtoXarajatApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: colorScheme,
-        scaffoldBackgroundColor: colorScheme.surface,
+        scaffoldBackgroundColor: const Color(0xFF020817),
         appBarTheme: AppBarTheme(
-          centerTitle: true,
+          backgroundColor: Colors.transparent,
+          foregroundColor: colorScheme.onBackground,
           elevation: 0,
-          backgroundColor: colorScheme.surface,
-          foregroundColor: colorScheme.onSurface,
-        ),
-        cardTheme: CardTheme(
-          elevation: 0.5,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+          centerTitle: false,
+          titleTextStyle: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
-      home: const HomePage(),
+      home: FutureBuilder<List<RefuelEntry>>(
+        future: _initialFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const SplashScreen();
+          }
+          final entries = snapshot.data ?? <RefuelEntry>[];
+          return HomeShell(
+            repository: _repository,
+            initialEntries: entries,
+          );
+        },
+      ),
     );
   }
 }
 
-/// Yoqilg'i yozuvi modeli (odometr bo'yicha)
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+  }
+}
+
+/// --- MODEL LAYER ---
+
 class RefuelEntry {
   final String id;
-  final DateTime dateTime;
-  final double odometerKm; // paneldagi umumiy km
-  final double liters; // qancha litr quyding
-  final bool isFullTank; // shu quyishdan keyin balon FULL bo'ldimi?
-  final double? pricePerLiter; // 1 litr narxi (ixtiyoriy)
-  final String? note;
+  final DateTime date;
+  final double distanceKm; // shu yo'lga sarflangan masofa
+  final double liters; // quyilgan litr
+  final double pricePerLiter; // 1 litr narxi so'mda
+  final bool isFull; // full quyildimi yoki qismanmi
 
   RefuelEntry({
     required this.id,
-    required this.dateTime,
-    required this.odometerKm,
+    required this.date,
+    required this.distanceKm,
     required this.liters,
-    required this.isFullTank,
-    this.pricePerLiter,
-    this.note,
+    required this.pricePerLiter,
+    required this.isFull,
   });
 
-  double get totalCost =>
-      pricePerLiter != null ? pricePerLiter! * liters : 0.0;
+  double get cost => liters * pricePerLiter;
 
-  // JSON ga aylantirish (saqlash uchun)
   Map<String, dynamic> toJson() => {
         'id': id,
-        'dateTime': dateTime.toIso8601String(),
-        'odometerKm': odometerKm,
+        'date': date.toIso8601String(),
+        'distanceKm': distanceKm,
         'liters': liters,
-        'isFullTank': isFullTank,
         'pricePerLiter': pricePerLiter,
-        'note': note,
+        'isFull': isFull,
       };
 
-  // JSON dan obyektga qaytarish
-  factory RefuelEntry.fromJson(Map<String, dynamic> json) => RefuelEntry(
-        id: json['id'] as String,
-        dateTime: DateTime.parse(json['dateTime'] as String),
-        odometerKm: (json['odometerKm'] as num).toDouble(),
-        liters: (json['liters'] as num).toDouble(),
-        isFullTank: json['isFullTank'] as bool,
-        pricePerLiter: json['pricePerLiter'] == null
-            ? null
-            : (json['pricePerLiter'] as num).toDouble(),
-        note: json['note'] as String?,
+  factory RefuelEntry.fromJson(Map<String, dynamic> json) {
+    return RefuelEntry(
+      id: json['id'] as String,
+      date: DateTime.parse(json['date'] as String),
+      distanceKm: (json['distanceKm'] as num).toDouble(),
+      liters: (json['liters'] as num).toDouble(),
+      pricePerLiter: (json['pricePerLiter'] as num).toDouble(),
+      isFull: json['isFull'] as bool? ?? false,
+    );
+  }
+}
+
+class AppSettings {
+  final bool defaultFullTank;
+
+  AppSettings({required this.defaultFullTank});
+
+  Map<String, dynamic> toJson() => {
+        'defaultFullTank': defaultFullTank,
+      };
+
+  factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
+        defaultFullTank: json['defaultFullTank'] as bool? ?? true,
       );
+
+  static AppSettings get initial => AppSettings(defaultFullTank: true);
 }
 
-/// Ikki FULL orasidagi sarf segmenti
-class ConsumptionSegment {
-  final RefuelEntry from;
-  final RefuelEntry to;
-  final double distanceKm;
-  final double liters;
-  final double cost;
+class FuelStats {
+  final double totalDistance;
+  final double totalLiters;
+  final double totalCost;
+  final double avgPer100km;
+  final double avgPricePerLiter;
 
-  ConsumptionSegment({
-    required this.from,
-    required this.to,
-    required this.distanceKm,
-    required this.liters,
-    required this.cost,
+  FuelStats({
+    required this.totalDistance,
+    required this.totalLiters,
+    required this.totalCost,
+    required this.avgPer100km,
+    required this.avgPricePerLiter,
   });
 
-  double get per100 => liters / distanceKm * 100;
+  factory FuelStats.fromEntries(List<RefuelEntry> entries) {
+    var distance = 0.0;
+    var liters = 0.0;
+    var cost = 0.0;
+
+    for (final e in entries) {
+      distance += e.distanceKm;
+      liters += e.liters;
+      cost += e.cost;
+    }
+
+    final avgPer100 = distance > 0 ? (liters * 100.0) / distance : 0.0;
+    final avgPrice = liters > 0 ? cost / liters : 0.0;
+
+    return FuelStats(
+      totalDistance: distance,
+      totalLiters: liters,
+      totalCost: cost,
+      avgPer100km: avgPer100,
+      avgPricePerLiter: avgPrice,
+    );
+  }
 }
 
-/// Oylik statistikaga agregatsiya
-class MonthlyStats {
-  final int year;
-  final int month;
-  final double distanceKm;
-  final double liters;
-  final double cost;
+/// --- REPOSITORY: Hive + iCloud (MethodChannel) ---
 
-  MonthlyStats({
-    required this.year,
-    required this.month,
-    required this.distanceKm,
-    required this.liters,
-    required this.cost,
-  });
+class FuelRepository {
+  static const _boxName = 'autoxarajat_box';
+  static const _entriesKey = 'entries_json';
+  static const _settingsKey = 'settings_json';
 
-  String get label =>
-      DateFormat('MMM yy').format(DateTime(year, month, 1));
+  static const MethodChannel _iCloudChannel = MethodChannel('icloud_sync');
 
-  double get per100 =>
-      distanceKm > 0 ? (liters / distanceKm * 100) : 0.0;
-}
+  late Box<String> _box;
 
-/// FULL-to-FULL segmentlar yasash
-List<ConsumptionSegment> buildSegments(List<RefuelEntry> entries) {
-  if (entries.length < 2) return [];
+  Future<void> init() async {
+    _box = await Hive.openBox<String>(_boxName);
+  }
 
-  final sorted = [...entries]
-    ..sort((a, b) => a.odometerKm.compareTo(b.odometerKm));
+  Future<List<RefuelEntry>> loadEntries() async {
+    final local = _loadEntriesFromLocal();
 
-  final segments = <ConsumptionSegment>[];
-  int? lastFullIndex;
-
-  for (int i = 0; i < sorted.length; i++) {
-    final current = sorted[i];
-    if (current.isFullTank) {
-      if (lastFullIndex != null &&
-          current.odometerKm > sorted[lastFullIndex].odometerKm) {
-        final from = sorted[lastFullIndex];
-        final to = current;
-        final distance = to.odometerKm - from.odometerKm;
-        double liters = 0;
-        double cost = 0;
-        for (int k = lastFullIndex + 1; k <= i; k++) {
-          liters += sorted[k].liters;
-          cost += sorted[k].totalCost;
-        }
-        if (distance > 0 && liters > 0) {
-          segments.add(
-            ConsumptionSegment(
-              from: from,
-              to: to,
-              distanceKm: distance,
-              liters: liters,
-              cost: cost,
-            ),
-          );
-        }
+    // iCloud'dan o'qib ko'ramiz, bo'lsa – ustun
+    try {
+      final cloud = await _loadEntriesFromICloud();
+      if (cloud.isNotEmpty) {
+        await _saveEntriesToLocal(cloud);
+        return cloud;
       }
-      lastFullIndex = i;
+    } catch (_) {
+      // iCloud xatolarini e'tiborga olmasak ham bo'ladi, local ishlayveradi
+    }
+
+    return local;
+  }
+
+  List<RefuelEntry> _loadEntriesFromLocal() {
+    final raw = _box.get(_entriesKey);
+    if (raw == null || raw.isEmpty) return <RefuelEntry>[];
+    final list = jsonDecode(raw) as List<dynamic>;
+    return list
+        .map(
+          (e) => RefuelEntry.fromJson(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> _saveEntriesToLocal(List<RefuelEntry> entries) async {
+    final raw =
+        jsonEncode(entries.map((e) => e.toJson()).toList(growable: false));
+    await _box.put(_entriesKey, raw);
+  }
+
+  Future<void> saveEntries(List<RefuelEntry> entries) async {
+    await _saveEntriesToLocal(entries);
+    try {
+      final entriesJson =
+          jsonEncode(entries.map((e) => e.toJson()).toList(growable: false));
+      final updatedAt = DateTime.now().toIso8601String();
+      await _iCloudChannel.invokeMethod<void>('saveEntries', {
+        'entriesJson': entriesJson,
+        'updatedAt': updatedAt,
+      });
+    } catch (_) {
+      // iCloud bo'lmasa ham app ishlayveradi
     }
   }
 
-  return segments;
+  Future<List<RefuelEntry>> _loadEntriesFromICloud() async {
+    final result =
+        await _iCloudChannel.invokeMethod<dynamic>('loadEntries');
+    if (result == null) return <RefuelEntry>[];
+
+    final map = Map<String, dynamic>.from(result as Map);
+    final entriesJson = map['entriesJson'] as String?;
+    if (entriesJson == null || entriesJson.isEmpty) {
+      return <RefuelEntry>[];
+    }
+    final list = jsonDecode(entriesJson) as List<dynamic>;
+    return list
+        .map(
+          (e) => RefuelEntry.fromJson(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<AppSettings> loadSettings() async {
+    final raw = _box.get(_settingsKey);
+    if (raw == null || raw.isEmpty) return AppSettings.initial;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return AppSettings.fromJson(map);
+    } catch (_) {
+      return AppSettings.initial;
+    }
+  }
+
+  Future<void> saveSettings(AppSettings settings) async {
+    final raw = jsonEncode(settings.toJson());
+    await _box.put(_settingsKey, raw);
+  }
 }
 
-/// Segmentlar bo'yicha oylik statistikani hisoblash
-List<MonthlyStats> buildMonthlyStats(List<ConsumptionSegment> segments) {
-  final map = <String, MonthlyStats>{};
+/// --- SHELL: Bottom navigation bilan 3 ta sahifa ---
 
-  for (final s in segments) {
-    final dt = s.to.dateTime;
-    final key = '${dt.year}-${dt.month}';
-    final existing = map[key];
-    if (existing == null) {
-      map[key] = MonthlyStats(
-        year: dt.year,
-        month: dt.month,
-        distanceKm: s.distanceKm,
-        liters: s.liters,
-        cost: s.cost,
-      );
-    } else {
-      map[key] = MonthlyStats(
-        year: existing.year,
-        month: existing.month,
-        distanceKm: existing.distanceKm + s.distanceKm,
-        liters: existing.liters + s.liters,
-        cost: existing.cost + s.cost,
-      );
-    }
-  }
+class HomeShell extends StatefulWidget {
+  final FuelRepository repository;
+  final List<RefuelEntry> initialEntries;
 
-  final list = map.values.toList();
-  list.sort((a, b) {
-    final da = DateTime(a.year, a.month);
-    final db = DateTime(b.year, b.month);
-    return da.compareTo(db);
+  const HomeShell({
+    super.key,
+    required this.repository,
+    required this.initialEntries,
   });
-  return list;
-}
-
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomeShellState extends State<HomeShell> {
+  late List<RefuelEntry> _entries;
+  late AppSettings _settings;
   int _currentIndex = 0;
-
-  // Sozlamalar
-  double _tankCapacityLiters = 48; // Nexia 3 balon hajmi
-
-  // Dastlabki test ma'lumotlar (keyin o'zingniki bilan to'ldirasan)
-  final List<RefuelEntry> _entries = [
-    RefuelEntry(
-      id: 'e1',
-      dateTime: DateTime(2025, 1, 1, 10, 0),
-      odometerKm: 100000,
-      liters: 23,
-      isFullTank: true,
-      pricePerLiter: 5_000, // misol uchun
-      note: '268 km / 23 l',
-    ),
-    RefuelEntry(
-      id: 'e2',
-      dateTime: DateTime(2025, 1, 5, 9, 0),
-      odometerKm: 100268,
-      liters: 43,
-      isFullTank: true,
-      pricePerLiter: 5_000,
-      note: '331 km / 43 l',
-    ),
-    RefuelEntry(
-      id: 'e3',
-      dateTime: DateTime(2025, 1, 10, 9, 30),
-      odometerKm: 100599,
-      liters: 44.7,
-      isFullTank: true,
-      pricePerLiter: 5_200,
-      note: '368 km / 44.7 l',
-    ),
-    RefuelEntry(
-      id: 'e4',
-      dateTime: DateTime(2025, 1, 15, 8, 45),
-      odometerKm: 100967,
-      liters: 42,
-      isFullTank: true,
-      pricePerLiter: 5_200,
-      note: '365 km / 42 l',
-    ),
-  ];
-
-  final _dateFormat = DateFormat('dd.MM.yyyy HH:mm');
-
-  List<RefuelEntry> get _sortedEntries {
-    final list = [..._entries];
-    list.sort((a, b) => b.dateTime.compareTo(a.dateTime));
-    return list;
-  }
+  bool _isLoadingSettings = true;
 
   @override
   void initState() {
     super.initState();
-    _loadInitialEntries();
+    _entries = List<RefuelEntry>.from(widget.initialEntries);
+    _loadSettings();
   }
 
-  /// App ochilganda lokal + iCloud'dan o'qish
-  Future<void> _loadInitialEntries() async {
-    // 1) Lokal
-    final localEntries = await StorageHelper.loadEntries();
-    final localUpdatedAt = await StorageHelper.loadUpdatedAt();
-
-    if (mounted && localEntries.isNotEmpty) {
-      setState(() {
-        _entries
-          ..clear()
-          ..addAll(localEntries);
-      });
-    }
-
-    // 2) iCloud (agar bor bo'lsa, va yangiroq bo'lsa — ustidan yozamiz)
-    final cloudState = await CloudSyncService.loadEntries();
-    if (cloudState == null || cloudState.entries.isEmpty) {
-      // Agar cloud bo'sh, lekin lokal bor bo'lsa – lokalni cloudga push qilamiz
-      if (localEntries.isNotEmpty && localUpdatedAt != null) {
-        await CloudSyncService.saveEntries(localEntries, localUpdatedAt);
-      }
-      return;
-    }
-
-    final cloudUpdatedAt = cloudState.updatedAt;
-    final bool isCloudNewer;
-    if (cloudUpdatedAt == null) {
-      isCloudNewer = false;
-    } else if (localUpdatedAt == null) {
-      isCloudNewer = true;
-    } else {
-      isCloudNewer = cloudUpdatedAt.isAfter(localUpdatedAt);
-    }
-
-    if (isCloudNewer) {
-      if (mounted) {
-        setState(() {
-          _entries
-            ..clear()
-            ..addAll(cloudState.entries);
-        });
-      }
-      // Lokalni ham cloud'dan kelgan bilan yangilab qo'yamiz
-      await StorageHelper.saveEntries(cloudState.entries);
-    } else if (localEntries.isNotEmpty && localUpdatedAt != null) {
-      // Aksincha bo'lsa – lokal yangiroq, cloud'ni yangilaymiz
-      await CloudSyncService.saveEntries(localEntries, localUpdatedAt);
-    }
+  Future<void> _loadSettings() async {
+    final s = await widget.repository.loadSettings();
+    setState(() {
+      _settings = s;
+      _isLoadingSettings = false;
+    });
   }
 
-  /// Har safar o'zgarganda saqlash (lokal + iCloud)
-  Future<void> _persistEntries() async {
-    final updatedAt = await StorageHelper.saveEntries(_entries);
-    await CloudSyncService.saveEntries(_entries, updatedAt);
-  }
-
-  // Yozuv qo'shish / tahrirlash
-  void _addOrEditEntry({RefuelEntry? existing}) {
-    final odoController = TextEditingController(
-      text: existing != null ? existing.odometerKm.toStringAsFixed(0) : '',
-    );
-    final literController = TextEditingController(
-      text: existing != null ? existing.liters.toString() : '',
-    );
-    final priceController = TextEditingController(
-      text: existing?.pricePerLiter?.toString() ?? '',
-    );
-    final noteController =
-        TextEditingController(text: existing?.note ?? '');
-    bool isFull = existing?.isFullTank ?? true;
-
-    showModalBottomSheet(
+  Future<void> _addOrEditEntry({RefuelEntry? entry}) async {
+    final result = await showModalBottomSheet<RefuelEntry>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: const Color(0xFF020617),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 8,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade400,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    Text(
-                      existing == null
-                          ? 'Yangi yoqilg\'i yozuvi'
-                          : 'Yozuvni tahrirlash',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: odoController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Odometr (km)',
-                        hintText: 'Masalan: 123450',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: literController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(
-                              decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Quyilgan gaz (litr)',
-                        hintText: 'Masalan: 34.5',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: priceController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(
-                              decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: '1 litr narxi (so\'m)',
-                        hintText: 'Masalan: 5000',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Switch(
-                          value: isFull,
-                          onChanged: (v) {
-                            setModalState(() {
-                              isFull = v;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isFull
-                                ? 'Balon to\'liq to\'ldi (FULL)'
-                                : 'Qisman quyish (FULL emas)',
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: noteController,
-                      decoration: const InputDecoration(
-                        labelText: 'Izoh (ixtiyoriy)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          final odo = double.tryParse(
-                              odoController.text.trim());
-                          final liters = double.tryParse(
-                              literController.text.trim());
-                          final price = double.tryParse(
-                              priceController.text.trim());
-
-                          if (odo == null || liters == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Odometr va litrni to\'g\'ri kiriting',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-
-                          setState(() {
-                            if (existing == null) {
-                              _entries.add(
-                                RefuelEntry(
-                                  id: DateTime.now()
-                                      .microsecondsSinceEpoch
-                                      .toString(),
-                                  dateTime: DateTime.now(),
-                                  odometerKm: odo,
-                                  liters: liters,
-                                  isFullTank: isFull,
-                                  pricePerLiter: price,
-                                  note: noteController.text.isEmpty
-                                      ? null
-                                      : noteController.text,
-                                ),
-                              );
-                            } else {
-                              final index = _entries.indexWhere(
-                                  (e) => e.id == existing.id);
-                              if (index != -1) {
-                                _entries[index] = RefuelEntry(
-                                  id: existing.id,
-                                  dateTime: existing.dateTime,
-                                  odometerKm: odo,
-                                  liters: liters,
-                                  isFullTank: isFull,
-                                  pricePerLiter: price,
-                                  note: noteController.text.isEmpty
-                                      ? null
-                                      : noteController.text,
-                                );
-                              }
-                            }
-                          });
-
-                          _persistEntries();
-                          Navigator.of(ctx).pop();
-                        },
-                        icon: const Icon(Icons.save),
-                        label: Text(
-                          existing == null ? 'Saqlash' : 'Yangilash',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: RefuelFormSheet(
+            initial: entry,
+            defaultFullTank: _settings.defaultFullTank,
+          ),
         );
       },
     );
+
+    if (result == null) return;
+
+    setState(() {
+      final index = _entries.indexWhere((e) => e.id == result.id);
+      if (index == -1) {
+        _entries.add(result);
+      } else {
+        _entries[index] = result;
+      }
+      _entries.sort((a, b) => b.date.compareTo(a.date));
+    });
+
+    await widget.repository.saveEntries(_entries);
   }
 
-  void _deleteEntry(RefuelEntry entry) {
+  Future<void> _deleteEntry(RefuelEntry entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('O‘chirish'),
+        content: const Text('Bu yozuvni o‘chirmoqchimisiz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Bekor qilish'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Ha, o‘chir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     setState(() {
       _entries.removeWhere((e) => e.id == entry.id);
     });
-    _persistEntries();
+    await widget.repository.saveEntries(_entries);
+  }
+
+  Future<void> _updateSettings(AppSettings newSettings) async {
+    setState(() {
+      _settings = newSettings;
+    });
+    await widget.repository.saveSettings(newSettings);
   }
 
   @override
   Widget build(BuildContext context) {
-    final segments = buildSegments(_entries);
-    final monthlyStats = buildMonthlyStats(segments);
+    if (_isLoadingSettings) {
+      return const SplashScreen();
+    }
+
+    final stats = FuelStats.fromEntries(_entries);
+
+    final pages = [
+      DashboardPage(
+        entries: _entries,
+        stats: stats,
+        onAddOrEdit: _addOrEditEntry,
+        onDelete: _deleteEntry,
+      ),
+      StatsPage(
+        entries: _entries,
+        stats: stats,
+      ),
+      SettingsPage(
+        settings: _settings,
+        stats: stats,
+        onSettingsChanged: _updateSettings,
+        onClearAll: () async {
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Hammasini o‘chirish'),
+              content: const Text(
+                  'Barcha yozuvlar o‘chiriladi va iCloud bilan ham sinxronlashadi. Davom etamizmi?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Bekor qilish'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Ha, o‘chir'),
+                ),
+              ],
+            ),
+          );
+          if (ok == true) {
+            setState(() {
+              _entries.clear();
+            });
+            await widget.repository.saveEntries(_entries);
+          }
+        },
+      ),
+    ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('AvtoXarajat'),
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          _EntriesTab(
-            entries: _sortedEntries,
-            dateFormat: _dateFormat,
-            onEdit: _addOrEditEntry,
-            onDelete: _deleteEntry,
-          ),
-          _StatsTab(
-            entries: _entries,
-            segments: segments,
-            monthlyStats: monthlyStats,
-            tankCapacityLiters: _tankCapacityLiters,
-          ),
-          _SettingsTab(
-            tankCapacityLiters: _tankCapacityLiters,
-            onTankCapacityChanged: (value) {
-              setState(() {
-                _tankCapacityLiters = value;
-              });
-              _persistEntries();
-            },
-          ),
-        ],
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: pages[_currentIndex],
       ),
       bottomNavigationBar: NavigationBar(
+        height: 68,
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
+        onDestinationSelected: (i) {
           setState(() {
-            _currentIndex = index;
+            _currentIndex = i;
           });
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.list_alt_outlined),
-            selectedIcon: Icon(Icons.list_alt),
-            label: 'Yozuvlar',
+            icon: Icon(Icons.local_gas_station_outlined),
+            selectedIcon: Icon(Icons.local_gas_station),
+            label: 'Asosiy',
           ),
           NavigationDestination(
-            icon: Icon(Icons.query_stats_outlined),
-            selectedIcon: Icon(Icons.query_stats),
+            icon: Icon(Icons.analytics_outlined),
+            selectedIcon: Icon(Icons.analytics),
             label: 'Statistika',
           ),
           NavigationDestination(
@@ -599,383 +493,706 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       floatingActionButton: _currentIndex == 0
-          ? FloatingActionButton(
+          ? FloatingActionButton.extended(
               onPressed: () => _addOrEditEntry(),
-              child: const Icon(Icons.add),
+              icon: const Icon(Icons.add),
+              label: const Text('Yozuv qo‘shish'),
             )
           : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
   }
 }
 
-/// 1-tab: yozuvlar ro'yxati
-class _EntriesTab extends StatelessWidget {
-  final List<RefuelEntry> entries;
-  final DateFormat dateFormat;
-  final void Function({RefuelEntry? existing}) onEdit;
-  final void Function(RefuelEntry entry) onDelete;
+/// --- DASHBOARD SAHIFA ---
 
-  const _EntriesTab({
+class DashboardPage extends StatelessWidget {
+  final List<RefuelEntry> entries;
+  final FuelStats stats;
+  final Future<void> Function({RefuelEntry? entry}) onAddOrEdit;
+  final Future<void> Function(RefuelEntry entry) onDelete;
+
+  const DashboardPage({
+    super.key,
     required this.entries,
-    required this.dateFormat,
-    required this.onEdit,
+    required this.stats,
+    required this.onAddOrEdit,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) {
-      return const Center(
-        child:
-            Text('Hozircha ma\'lumot yo\'q. + tugmasi bilan yozuv qo\'shing.'),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: entries.length,
-      itemBuilder: (context, index) {
-        final e = entries[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          child: ListTile(
-            leading: CircleAvatar(
-              radius: 22,
-              backgroundColor:
-                  e.isFullTank ? Colors.green.shade100 : Colors.orange.shade100,
-              child: Icon(
-                Icons.local_gas_station,
-                color: e.isFullTank ? Colors.green.shade700 : Colors.orange,
-              ),
-            ),
-            title: Text(
-              '${e.liters.toStringAsFixed(1)} l  •  ${e.odometerKm.toStringAsFixed(0)} km',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              '${dateFormat.format(e.dateTime)}'
-              '${e.isFullTank ? '\nFULL balon' : '\nQisman quyish'}'
-              '${e.pricePerLiter != null ? '\n${e.totalCost.toStringAsFixed(0)} so\'m (taxminiy)' : ''}'
-              '${e.note != null ? '\n${e.note}' : ''}',
-            ),
-            isThreeLine: true,
-            trailing: PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'edit') {
-                  onEdit(existing: e);
-                } else if (value == 'delete') {
-                  onDelete(e);
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Tahrirlash'),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text('O\'chirish'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// 2-tab: Statistika + chartlar + oylik ma'lumotlar
-class _StatsTab extends StatelessWidget {
-  final List<RefuelEntry> entries;
-  final List<ConsumptionSegment> segments;
-  final List<MonthlyStats> monthlyStats;
-  final double tankCapacityLiters;
-
-  const _StatsTab({
-    required this.entries,
-    required this.segments,
-    required this.monthlyStats,
-    required this.tankCapacityLiters,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (entries.length < 2) {
-      return const Center(
-        child: Text(
-          'Statistika uchun kamida 2 ta yozuv kerak.\nKamida 2 marta yoqilg\'i kiritib ko\'ring.',
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-
-    final totalLiters =
-        entries.fold<double>(0, (sum, e) => sum + e.liters); // jami gaz (l)
-    final totalCost =
-        entries.fold<double>(0, (sum, e) => sum + e.totalCost); // jami xarajat
-
-    final sortedByOdo = [...entries]
-      ..sort((a, b) => a.odometerKm.compareTo(b.odometerKm));
-    final totalDistance =
-        sortedByOdo.last.odometerKm - sortedByOdo.first.odometerKm; // jami yo'l
-
-    // FULL segmentlar bo'yicha o'rtacha sarf (agar bo'lsa)
-    double avgPer100;
-    if (segments.isNotEmpty) {
-      final segDistance =
-          segments.fold<double>(0, (sum, s) => sum + s.distanceKm);
-      final segLiters =
-          segments.fold<double>(0, (sum, s) => sum + s.liters);
-      avgPer100 = segLiters / segDistance * 100;
-    } else {
-      avgPer100 = totalLiters / totalDistance * 100;
-    }
-
-    final maxPer100 = segments.isNotEmpty
-        ? segments.map((s) => s.per100).reduce(max)
-        : avgPer100;
-    final minPer100 = segments.isNotEmpty
-        ? segments.map((s) => s.per100).reduce(min)
-        : avgPer100;
-
-    final estimatedRange = avgPer100 > 0
-        ? tankCapacityLiters / avgPer100 * 100
-        : 0; // FULL balon bilan taxminiy yurish
-
-    // So'nggi 30 kun uchun
-    final now = DateTime.now();
-    final last30 = entries.where(
-      (e) => e.dateTime.isAfter(now.subtract(const Duration(days: 30))),
-    );
-    double last30Distance = 0;
-    if (last30.length >= 2) {
-      final byOdo = [...last30]
-        ..sort((a, b) => a.odometerKm.compareTo(b.odometerKm));
-      last30Distance = byOdo.last.odometerKm - byOdo.first.odometerKm;
-    }
-    final last30Liters =
-        last30.fold<double>(0, (sum, e) => sum + e.liters);
-    final last30Cost =
-        last30.fold<double>(0, (sum, e) => sum + e.totalCost);
-
-    // Segmentlar charti
-    final spots = <FlSpot>[];
-    for (int i = 0; i < segments.length; i++) {
-      spots.add(FlSpot(i.toDouble(), segments[i].per100));
-    }
-
-    // Oylik chart nuqtalari (avg l/100km)
-    final monthSpots = <FlSpot>[];
-    for (int i = 0; i < monthlyStats.length; i++) {
-      monthSpots.add(FlSpot(i.toDouble(), monthlyStats[i].per100));
-    }
+    final theme = Theme.of(context);
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          Text(
+            'Nexia 3 — Propan',
+            style:
+                theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Bugungi sarf va umumiy statistika',
+            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          Row(
             children: [
-              _StatCard(
-                label: 'Jami yo‘l',
-                value: totalDistance.toStringAsFixed(0),
-                unit: 'km',
+              Expanded(
+                child: _StatCard(
+                  label: 'Jami yo‘l',
+                  valueText: '${stats.totalDistance.toStringAsFixed(0)} km',
+                  icon: Icons.social_distance,
+                ),
               ),
-              _StatCard(
-                label: 'Jami gaz',
-                value: totalLiters.toStringAsFixed(1),
-                unit: 'l',
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                  label: 'Jami gaz',
+                  valueText: '${stats.totalLiters.toStringAsFixed(1)} L',
+                  icon: Icons.local_gas_station,
+                ),
               ),
-              _StatCard(
-                label: 'O‘rtacha sarf',
-                value: avgPer100.toStringAsFixed(1),
-                unit: 'l / 100km',
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                  label: 'Jami xarajat',
+                  valueText: '${stats.totalCost.toStringAsFixed(0)} so‘m',
+                  icon: Icons.payments,
+                ),
               ),
-              _StatCard(
-                label: 'FULL balon yurishi',
-                value: estimatedRange.toStringAsFixed(0),
-                unit: 'km (taxminiy)',
-              ),
-              _StatCard(
-                label: 'Jami xarajat',
-                value: totalCost.toStringAsFixed(0),
-                unit: 'so‘m',
-              ),
-              _StatCard(
-                label: 'So‘nggi 30 kun',
-                value: last30Distance.toStringAsFixed(0),
-                unit: 'km / ${last30Cost.toStringAsFixed(0)} so‘m',
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                  label: 'O‘rtacha 100 km',
+                  valueText: '${stats.avgPer100km.toStringAsFixed(1)} L',
+                  icon: Icons.speed,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 24),
-          if (segments.isNotEmpty)
-            _ChartCard(
-              title: 'FULL segmentlar bo\'yicha sarf (l/100km)',
-              child: LineChart(
-                LineChartData(
-                  minX: 0,
-                  maxX: max(0, (spots.length - 1).toDouble()),
-                  minY: (minPer100 * 0.8),
-                  maxY: (maxPer100 * 1.2),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 24,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= segments.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              '${idx + 1}',
-                              style: const TextStyle(fontSize: 10),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            value.toStringAsFixed(0),
-                            style: const TextStyle(fontSize: 10),
-                          );
-                        },
-                      ),
-                    ),
-                    rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  gridData: FlGridData(show: true),
-                  borderData: FlBorderData(show: true),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spots,
-                      isCurved: true,
-                      dotData: const FlDotData(show: true),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        applyCutOffY: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 16),
-          if (monthlyStats.isNotEmpty)
-            _ChartCard(
-              title: 'Oylik o‘rtacha sarf (l/100km)',
-              child: LineChart(
-                LineChartData(
-                  minX: 0,
-                  maxX:
-                      max(0, (monthSpots.length - 1).toDouble()),
-                  minY: monthlyStats
-                          .map((m) => m.per100)
-                          .reduce(min) *
-                      0.8,
-                  maxY: monthlyStats
-                          .map((m) => m.per100)
-                          .reduce(max) *
-                      1.2,
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= monthlyStats.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              monthlyStats[idx].label,
-                              style: const TextStyle(fontSize: 9),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 36,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            value.toStringAsFixed(0),
-                            style: const TextStyle(fontSize: 10),
-                          );
-                        },
-                      ),
-                    ),
-                    rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  gridData: FlGridData(show: true),
-                  borderData: FlBorderData(show: true),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: monthSpots,
-                      isCurved: true,
-                      dotData: const FlDotData(show: true),
-                      belowBarData:
-                          BarAreaData(show: true, applyCutOffY: true),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 16),
-          if (monthlyStats.isNotEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Oylik ma\'lumotlar',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
+          Row(
+            children: [
+              Text(
+                'So‘nggi quyishlar',
+                style: theme.textTheme.titleMedium
                     ?.copyWith(fontWeight: FontWeight.w600),
               ),
-            ),
+              const Spacer(),
+              if (entries.isNotEmpty)
+                Text(
+                  '${entries.length} ta yozuv',
+                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.white60),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
-          if (monthlyStats.isNotEmpty)
+          if (entries.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF020617),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.06),
+                ),
+              ),
+              child: Column(
+                children: [
+                  const Icon(
+                    Icons.local_gas_station_outlined,
+                    size: 40,
+                    color: Colors.white70,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Hali ma’lumot kiritilmadi',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Yangi gaz quyganingizda “Yozuv qo‘shish” tugmasi orqali kiritib boring.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            )
+          else
             Column(
-              children: monthlyStats.map((m) {
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(vertical: 4),
-                  child: ListTile(
-                    title: Text(m.label),
-                    subtitle: Text(
-                      'Yo‘l: ${m.distanceKm.toStringAsFixed(0)} km  •  '
-                      'Gaz: ${m.liters.toStringAsFixed(1)} l\n'
-                      'Sarf: ${m.per100.toStringAsFixed(1)} l/100km',
-                    ),
-                    trailing: Text(
-                      '${m.cost.toStringAsFixed(0)}\nso‘m',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
+              children: [
+                for (final e in entries)
+                  _RefuelTile(
+                    entry: e,
+                    onTap: () => onAddOrEdit(entry: e),
+                    onDelete: () => onDelete(e),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String valueText;
+  final IconData icon;
+
+  const _StatCard({
+    required this.label,
+    required this.valueText,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF020617),
+            Color(0xFF020617),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 18,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, size: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style:
+                      theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  valueText,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RefuelTile extends StatelessWidget {
+  final RefuelEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _RefuelTile({
+    required this.entry,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateText = _formatDate(entry.date);
+    final distanceText = '${entry.distanceKm.toStringAsFixed(0)} km';
+    final litersText = '${entry.liters.toStringAsFixed(1)} L';
+    final costText = entry.cost.toStringAsFixed(0);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF020617),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF22C55E),
+                      Color(0xFF16A34A),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  entry.isFull
+                      ? Icons.local_gas_station
+                      : Icons.local_gas_station_outlined,
+                  size: 22,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      litersText,
+                      style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        fontSize: 12,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$distanceText • ${entry.isFull ? 'Full' : 'Qisman'}',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      dateText,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$costText so‘m',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                    ),
+                    onPressed: onDelete,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// --- Yozuv qo'shish / tahrirlash uchun bottom sheet ---
+
+class RefuelFormSheet extends StatefulWidget {
+  final RefuelEntry? initial;
+  final bool defaultFullTank;
+
+  const RefuelFormSheet({
+    super.key,
+    this.initial,
+    required this.defaultFullTank,
+  });
+
+  @override
+  State<RefuelFormSheet> createState() => _RefuelFormSheetState();
+}
+
+class _RefuelFormSheetState extends State<RefuelFormSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late DateTime _date;
+  late TextEditingController _distanceCtrl;
+  late TextEditingController _litersCtrl;
+  late TextEditingController _priceCtrl;
+  late bool _isFull;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    _date = initial?.date ?? DateTime.now();
+    _distanceCtrl =
+        TextEditingController(text: initial?.distanceKm.toString() ?? '');
+    _litersCtrl =
+        TextEditingController(text: initial?.liters.toString() ?? '');
+    _priceCtrl = TextEditingController(
+        text: initial?.pricePerLiter.toStringAsFixed(0) ?? '');
+    _isFull = initial?.isFull ?? widget.defaultFullTank;
+  }
+
+  @override
+  void dispose() {
+    _distanceCtrl.dispose();
+    _litersCtrl.dispose();
+    _priceCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() {
+        _date = picked;
+      });
+    }
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+
+    final distance =
+        double.parse(_distanceCtrl.text.replaceAll(',', '.'));
+    final liters =
+        double.parse(_litersCtrl.text.replaceAll(',', '.'));
+    final price =
+        double.parse(_priceCtrl.text.replaceAll(',', '.'));
+
+    final id = widget.initial?.id ??
+        'refuel_${DateTime.now().microsecondsSinceEpoch}';
+
+    final entry = RefuelEntry(
+      id: id,
+      date: _date,
+      distanceKm: distance,
+      liters: liters,
+      pricePerLiter: price,
+      isFull: _isFull,
+    );
+
+    Navigator.of(context).pop(entry);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.initial != null;
+    final theme = Theme.of(context);
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          Text(
+            isEdit ? 'Yozuvni tahrirlash' : 'Yangi yozuv',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: _pickDate,
+            borderRadius: BorderRadius.circular(12),
+            child: Ink(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF020617),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event_note, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    _formatDate(_date),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const Spacer(),
+                  const Icon(Icons.calendar_today, size: 18),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _LabeledField(
+                  label: 'Masofa (km)',
+                  hint: 'Masofa',
+                  controller: _distanceCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _LabeledField(
+                  label: 'Litrlari',
+                  hint: 'Necha litr',
+                  controller: _litersCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _LabeledField(
+            label: '1 litr narxi (so‘m)',
+            hint: 'Masalan 5500',
+            controller: _priceCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Switch(
+                      value: _isFull,
+                      onChanged: (v) {
+                        setState(() {
+                          _isFull = v;
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('Full quyildi'),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _submit,
+                icon: Icon(isEdit ? Icons.save : Icons.check),
+                label: Text(isEdit ? 'Saqlash' : 'Qo‘shish'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _LabeledField extends StatelessWidget {
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final TextInputType keyboardType;
+
+  const _LabeledField({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    required this.keyboardType,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+        ),
+        const SizedBox(height: 4),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          validator: (val) {
+            if (val == null || val.trim().isEmpty) {
+              return 'Majburiy maydon';
+            }
+            final value =
+                double.tryParse(val.replaceAll(',', '.'));
+            if (value == null || value <= 0) {
+              return 'To‘g‘ri son kiriting';
+            }
+            return null;
+          },
+          decoration: InputDecoration(
+            hintText: hint,
+            filled: true,
+            fillColor: const Color(0xFF020617),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// --- STATISTIKA SAHIFA ---
+
+class StatsPage extends StatelessWidget {
+  final List<RefuelEntry> entries;
+  final FuelStats stats;
+
+  const StatsPage({
+    super.key,
+    required this.entries,
+    required this.stats,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sorted = List<RefuelEntry>.from(entries)
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Statistika',
+            style:
+                theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Yo‘qilg‘i sarfi bo‘yicha umumiy natijalar',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF020617),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: Column(
+              children: [
+                _StatsRow(
+                  label: 'Jami yo‘l',
+                  value: '${stats.totalDistance.toStringAsFixed(0)} km',
+                ),
+                _StatsRow(
+                  label: 'Jami gaz',
+                  value: '${stats.totalLiters.toStringAsFixed(1)} L',
+                ),
+                _StatsRow(
+                  label: 'Jami xarajat',
+                  value: '${stats.totalCost.toStringAsFixed(0)} so‘m',
+                ),
+                _StatsRow(
+                  label: 'O‘rtacha 100 km sarf',
+                  value: '${stats.avgPer100km.toStringAsFixed(1)} L',
+                ),
+                _StatsRow(
+                  label: 'O‘rtacha 1 L narx',
+                  value: '${stats.avgPricePerLiter.toStringAsFixed(0)} so‘m',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Har safar bo‘yicha 100 km sarf',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          if (sorted.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF020617),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: const Text(
+                'Hali ma’lumot yo‘q. Bir nechta yozuv kiriting.',
+                style: TextStyle(color: Colors.white70),
+              ),
+            )
+          else
+            Column(
+              children: sorted.map((e) {
+                final per100 = e.distanceKm > 0
+                    ? e.liters * 100.0 / e.distanceKm
+                    : 0.0;
+                final date = _formatDate(e.date);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF020617),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          date,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                      Text(
+                        '${per100.toStringAsFixed(1)} L / 100 km',
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
                 );
               }).toList(),
@@ -986,200 +1203,30 @@ class _StatsTab extends StatelessWidget {
   }
 }
 
-class _StatCard extends StatelessWidget {
+class _StatsRow extends StatelessWidget {
   final String label;
   final String value;
-  final String unit;
 
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.unit,
-  });
+  const _StatsRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 170,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: LinearGradient(
-            colors: [
-              colorScheme.primaryContainer,
-              colorScheme.secondaryContainer,
-            ],
-          ),
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onPrimaryContainer
-                    .withOpacity(0.8),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: colorScheme.onPrimaryContainer,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              unit,
-              style: TextStyle(
-                fontSize: 11,
-                color: colorScheme.onPrimaryContainer
-                    .withOpacity(0.8),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ChartCard extends StatelessWidget {
-  final String title;
-  final Widget child;
-
-  const _ChartCard({
-    required this.title,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 260,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(child: child),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 3-tab: Sozlamalar (hozircha balon hajmi)
-class _SettingsTab extends StatelessWidget {
-  final double tankCapacityLiters;
-  final ValueChanged<double> onTankCapacityChanged;
-
-  const _SettingsTab({
-    required this.tankCapacityLiters,
-    required this.onTankCapacityChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final controller =
-        TextEditingController(text: tankCapacityLiters.toStringAsFixed(1));
-
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: ListView(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
         children: [
-          const Text(
-            'Sozlamalar',
-            style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14.0),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Balon hajmi (litr)',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: controller,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true),
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () {
-                          final value =
-                              double.tryParse(controller.text.trim());
-                          if (value == null || value <= 0) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                    'Balon hajmini to\'g\'ri kiriting (masalan 48).'),
-                              ),
-                            );
-                            return;
-                          }
-                          onTankCapacityChanged(value);
-                          FocusScope.of(context).unfocus();
-                        },
-                        child: const Text('Saqlash'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Bu qiymat bo\'yicha FULL balon bilan taxminiy yurish masofasi hisoblanadi.',
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ],
-              ),
+          Expanded(
+            child: Text(
+              label,
+              style:
+                  theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
             ),
           ),
-          const SizedBox(height: 16),
-          Card(
-            child: const Padding(
-              padding: EdgeInsets.all(14.0),
-              child: Text(
-                'Keyinchalik bu yerga tema (dark mode), valyuta, narxlar, '
-                'va iCloud sync sozlamalarini qo\'shimcha nazorat qilib qo\'shish mumkin.',
-                style: TextStyle(fontSize: 13),
-              ),
-            ),
+          Text(
+            value,
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -1187,93 +1234,161 @@ class _SettingsTab extends StatelessWidget {
   }
 }
 
-/// Ma'lumotlarni telefon ichida saqlash/yuklash uchun yordamchi
-class StorageHelper {
-  static const _keyEntries = 'refuel_entries';
-  static const _keyUpdatedAt = 'refuel_entries_updated_at';
+/// --- SOZLAMALAR SAHIFA ---
 
-  // Barcha yozuvlarni saqlash
-  static Future<DateTime> saveEntries(List<RefuelEntry> entries) async {
-    final prefs = await SharedPreferences.getInstance();
-    final listMap = entries.map((e) => e.toJson()).toList();
-    final jsonStr = jsonEncode(listMap);
-    final now = DateTime.now();
-    await prefs.setString(_keyEntries, jsonStr);
-    await prefs.setString(_keyUpdatedAt, now.toIso8601String());
-    return now;
-  }
+class SettingsPage extends StatelessWidget {
+  final AppSettings settings;
+  final FuelStats stats;
+  final Future<void> Function(AppSettings newSettings) onSettingsChanged;
+  final Future<void> Function() onClearAll;
 
-  // Barcha yozuvlarni o'qish
-  static Future<List<RefuelEntry>> loadEntries() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString(_keyEntries);
-    if (jsonStr == null) return [];
-    final List<dynamic> list = jsonDecode(jsonStr);
-    return list
-        .map((e) => RefuelEntry.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
+  const SettingsPage({
+    super.key,
+    required this.settings,
+    required this.stats,
+    required this.onSettingsChanged,
+    required this.onClearAll,
+  });
 
-  static Future<DateTime?> loadUpdatedAt() async {
-    final prefs = await SharedPreferences.getInstance();
-    final str = prefs.getString(_keyUpdatedAt);
-    if (str == null || str.isEmpty) return null;
-    return DateTime.tryParse(str);
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+      children: [
+        Text(
+          'Sozlamalar',
+          style:
+              theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Avtomobilingiz va saqlash sozlamalari',
+          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF020617),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Column(
+            children: [
+              _SettingSwitchTile(
+                title: 'Full quyish — standart',
+                subtitle:
+                    'Yangi yozuv qo‘shayotganda “Full quyildi” switche avtomatik yoqilgan bo‘ladi.',
+                value: settings.defaultFullTank,
+                onChanged: (v) {
+                  onSettingsChanged(
+                    AppSettings(defaultFullTank: v),
+                  );
+                },
+              ),
+              const Divider(height: 24),
+              Row(
+                children: [
+                  const Icon(Icons.cloud_done_outlined),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Ma’lumotlar iCloud + telefon xotirasida saqlanadi. '
+                      'Ilovani o‘chirib, qayta o‘rnatsangiz ham qayta yuklab olasiz.',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF020617),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Xavfsizlik',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Jami yo‘l: ${stats.totalDistance.toStringAsFixed(0)} km.\n'
+                'Jami gaz: ${stats.totalLiters.toStringAsFixed(1)} L.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                ),
+                onPressed: onClearAll,
+                icon: const Icon(Icons.delete_forever),
+                label: const Text('Barcha ma’lumotni o‘chirish'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 
-/// iCloud bilan sinxronlash (NSUbiquitousKeyValueStore)
-class CloudSyncService {
-  static const _channel = MethodChannel('icloud_sync');
+class _SettingSwitchTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
 
-  static Future<void> saveEntries(
-      List<RefuelEntry> entries, DateTime updatedAt) async {
-    try {
-      final jsonStr =
-          jsonEncode(entries.map((e) => e.toJson()).toList());
-      await _channel.invokeMethod('saveEntries', {
-        'entriesJson': jsonStr,
-        'updatedAt': updatedAt.toIso8601String(),
-      });
-    } catch (e) {
-      // iCloud ishlamasa ham app ishlashda davom etadi
-      print('Cloud save error: $e');
-    }
+  const _SettingSwitchTile({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.bodyLarge
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+        ),
+      ],
+    );
   }
-
-  static Future<_CloudState?> loadEntries() async {
-    try {
-      final result =
-          await _channel.invokeMethod<Map<dynamic, dynamic>>(
-              'loadEntries');
-
-      if (result == null) return null;
-      final jsonStr = (result['entriesJson'] as String?) ?? '';
-      final updatedAtStr =
-          (result['updatedAt'] as String?) ?? '';
-
-      if (jsonStr.isEmpty) return null;
-
-      final List<dynamic> list = jsonDecode(jsonStr);
-      final entries = list
-          .map((e) =>
-              RefuelEntry.fromJson(e as Map<String, dynamic>))
-          .toList();
-      final updatedAt = updatedAtStr.isNotEmpty
-          ? DateTime.tryParse(updatedAtStr)
-          : null;
-
-      return _CloudState(entries: entries, updatedAt: updatedAt);
-    } catch (e) {
-      print('Cloud load error: $e');
-      return null;
-    }
-  }
-}
-
-class _CloudState {
-  final List<RefuelEntry> entries;
-  final DateTime? updatedAt;
-
-  _CloudState({required this.entries, required this.updatedAt});
 }
