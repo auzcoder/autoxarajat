@@ -4,32 +4,64 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../core/models.dart';
 import '../core/storage.dart';
 
-
 class AiAutoScreen extends StatelessWidget {
   final Box box;
   final AppProfile profile;
   const AiAutoScreen({super.key, required this.box, required this.profile});
 
+  List<RefuelEntry> _filterByProfilePlate(List<RefuelEntry> entries) {
+    final plate = profile.plateNumber;
+    if (plate == null || plate.isEmpty) {
+      return entries
+          .where((e) => e.plateNumber == null || e.plateNumber!.isEmpty)
+          .toList();
+    }
+    return entries.where((e) => e.plateNumber == plate).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final entries = loadEntries(box);
+    final all = loadEntries(box);
+    final entries = _filterByProfilePlate(all);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     double? avgLPer100;
     double? avgKmPerLiter;
     double? estimatedRange;
+    double? minRange;
+    double? maxRange;
 
     if (entries.isNotEmpty) {
-      final consList =
-          entries.map((e) => e.consumptionPer100).whereType<double>().toList();
-      if (consList.isNotEmpty) {
-        avgLPer100 = consList.reduce((a, b) => a + b) / consList.length;
-        avgKmPerLiter = 100 / avgLPer100;
-      }
+      // Faqat TO‘LIQ quyilgan yozuvlar bo‘yicha hisoblaymiz (aniqroq bo‘lsin)
+      final fullEntries = entries
+          .where((e) => e.isFullTank && e.consumptionPer100 != null)
+          .toList();
+      final usedList = fullEntries.isNotEmpty ? fullEntries : entries;
 
-      if (avgKmPerLiter != null && profile.gasTankCapacity != null) {
-        estimatedRange = profile.gasTankCapacity! * avgKmPerLiter;
+      final consList = usedList
+          .map((e) => e.consumptionPer100)
+          .whereType<double>()
+          .toList();
+
+      if (consList.isNotEmpty) {
+        consList.sort();
+        // Oxirgi 3 ta qiymat bo‘yicha (yangi ma’lumotlar asosida) o‘rtacha
+        final last3 = consList.length <= 3
+            ? consList
+            : consList.sublist(consList.length - 3);
+        avgLPer100 =
+            last3.reduce((a, b) => a + b) / last3.length;
+
+        avgKmPerLiter = 100 / avgLPer100;
+
+        if (profile.gasTankCapacity != null) {
+          final base = profile.gasTankCapacity! * avgKmPerLiter;
+          // Ozroq diapazon beramiz (±7%)
+          estimatedRange = base;
+          minRange = base * 0.93;
+          maxRange = base * 1.07;
+        }
       }
     }
 
@@ -54,19 +86,34 @@ class AiAutoScreen extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Oldingi ma’lumotlarga tayangan holda keyingi yoqilg‘i va yurish masofasi bo‘yicha qisqacha tahlil.',
+            'So‘nggi yoqilg‘i ma’lumotlari asosida sarf, 1 km narxi va keyingi safar qaysi km atrofida yoqilg‘i tugashini taxmin qilamiz.',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+              color:
+                  theme.textTheme.bodySmall?.color?.withOpacity(0.7),
             ),
           ),
           const SizedBox(height: 18),
+          if (estimatedRange != null)
+            _RangeHighlightCard(
+              estimatedRange: estimatedRange!,
+              minRange: minRange,
+              maxRange: maxRange,
+            ),
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(24),
               gradient: LinearGradient(
                 colors: isDark
-                    ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
-                    : [const Color(0xFF1D4ED8), const Color(0xFF22C55E)],
+                    ? [
+                        const Color(0xFF1E293B),
+                        const Color(0xFF0F172A),
+                      ]
+                    : [
+                        const Color(0xFF2563EB),
+                        const Color(0xFF22C1C3),
+                      ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
             padding: const EdgeInsets.all(18),
@@ -78,8 +125,8 @@ class AiAutoScreen extends StatelessWidget {
                 Expanded(
                   child: Text(
                     estimatedRange == null
-                        ? 'Hali yetarlicha ma’lumot yo‘q.\nBir necha marotaba yoqilg‘i yozuvi kiritgandan keyin taxminiy yo‘l masofasini ko‘rsatamiz.'
-                        : 'Hozirgi o‘rtacha sarf bo‘yicha balon to‘liq to‘lganda taxminan ${estimatedRange.toStringAsFixed(0)} km yuradi.',
+                        ? 'Hali yetarlicha ma’lumot yo‘q.\nBir necha to‘liq yoqilg‘i yozuvlari kiritgandan keyin keyingi safar qaysi kmda yoqilg‘i tugashini aniqroq taxmin qilib beramiz.'
+                        : 'So‘nggi to‘liq yoqilg‘i ma’lumotlariga asoslangan taxmin. Real sarf uslubingizga qarab ±10% atrofida farq qilishi mumkin.',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 13,
@@ -102,25 +149,101 @@ class AiAutoScreen extends StatelessWidget {
                   icon: Icons.speed,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: _StatCardLike(
                   title: '1 km narxi',
                   value: avgCostPerKm == null
                       ? '—'
                       : '${avgCostPerKm.toStringAsFixed(0)} so‘m',
-                  icon: Icons.payments,
+                  icon: Icons.price_change,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          if (entries.isNotEmpty)
-            _AiAdviceList(
-              avgLPer100: avgLPer100,
-              avgCostPerKm: avgCostPerKm,
-              estimatedRange: estimatedRange,
+          const SizedBox(height: 18),
+          _AiAdviceList(
+            avgLPer100: avgLPer100,
+            avgCostPerKm: avgCostPerKm,
+            estimatedRange: estimatedRange,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RangeHighlightCard extends StatelessWidget {
+  final double estimatedRange;
+  final double? minRange;
+  final double? maxRange;
+  const _RangeHighlightCard({
+    super.key,
+    required this.estimatedRange,
+    this.minRange,
+    this.maxRange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final String subtitle;
+    if (minRange != null && maxRange != null) {
+      subtitle =
+          'Taxminiy diapazon: ${minRange!.toStringAsFixed(0)} – ${maxRange!.toStringAsFixed(0)} km.\n'
+          'Yoqilg‘i tugashiga yaqinlashganda bu oraliqda bo‘lishi mumkin.';
+    } else {
+      subtitle =
+          'Taxminan shu masofadan so‘ng bakdagi yoqilg‘i tugaydi. Safarlaringizni shu bo‘yicha rejalashtiring.';
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8, bottom: 18),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            theme.colorScheme.primary,
+            theme.colorScheme.primary.withOpacity(0.15),
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Keyingi yoqilg‘i rejasi',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: Colors.white.withOpacity(0.9),
             ),
+          ),
+          const SizedBox(height: 8),
+          TweenAnimationBuilder<double>(
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.easeOutCubic,
+            tween: Tween<double>(begin: 0, end: estimatedRange),
+            builder: (context, value, _) {
+              return Text(
+                '${value.toStringAsFixed(0)} km',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.white.withOpacity(0.9),
+            ),
+          ),
         ],
       ),
     );
@@ -163,30 +286,32 @@ class _StatCardLike extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: theme.colorScheme.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+              color: isDark
+                  ? Colors.blueGrey.shade900
+                  : Colors.blue.shade50,
             ),
-            child: Icon(icon, size: 20, color: theme.colorScheme.primary),
+            child: Icon(
+              icon,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.hintColor)),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
+            child: Text(
+              title,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+              ),
             ),
-          )
+          ),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -211,29 +336,37 @@ class _AiAdviceList extends StatelessWidget {
     if (avgLPer100 != null) {
       if (avgLPer100! > 12) {
         advices.add(
-            'Yoqilg‘i sarfi biroz balandroq. Tez-tez keskin gaz berishdan qoching va shahar tashqarisida o‘rtacha tezlikda yuring.');
+          'Yoqilg‘i sarfi biroz baland. Gaz pedalini keskin bosmaslik, '
+          'tez-tez to‘xtash–yurishlardan qochish yoqilg‘i sarfini sezilarli kamaytiradi.',
+        );
       } else if (avgLPer100! < 8) {
         advices.add(
-            'Ajoyib! Avtomobil juda iqtisodiy ishlayapti. Hozirgi uslubni davom ettiring.');
+          'Ajoyib! Avtomobil juda iqtisodiy ishlayapti. Hozirgi haydash uslubini davom ettiring.',
+        );
       } else {
         advices.add(
-            'Sarf o‘rtacha. Agar yanada tejamkor bo‘lishni istasangiz, keraksiz holatda dvigatelni ishlatib qo‘ymang.');
+          'Sarf normal diapazonda. Agar yana tejamoqchi bo‘lsangiz, '
+          'shahar tirband vaqtlarida kamroq harakatlanishga harakat qiling.',
+        );
       }
     }
 
     if (avgCostPerKm != null) {
       advices.add(
-          'Hozircha 1 km uchun o‘rtacha ${avgCostPerKm!.toStringAsFixed(0)} so‘m sarflayapsiz. Keyingi yoqilg‘i narxiga qarab bu qiymat o‘zgaradi.');
+        'Hozircha 1 km yo‘l sizga taxminan ${avgCostPerKm!.toStringAsFixed(0)} so‘mga tushmoqda.',
+      );
     }
 
     if (estimatedRange != null) {
       advices.add(
-          'To‘liq balon bilan taxminan ${estimatedRange!.toStringAsFixed(0)} km yurish mumkin – yo‘lni rejalashtirganda e’tiborga oling.');
+        'Bak to‘la bo‘lganda taxminiy yurish masofasi ${estimatedRange!.toStringAsFixed(0)} km atrofida.',
+      );
     }
 
     if (advices.isEmpty) {
       advices.add(
-          'Hozircha AI tavsiyalar uchun ma’lumot yetarli emas. Bir necha marta yoqilg‘i yozuvlari kiriting.');
+        'Hozircha AI tavsiyalar uchun ma’lumot yetarli emas. Bir necha marta yoqilg‘i yozuvlari kiriting.',
+      );
     }
 
     return Column(
@@ -251,27 +384,15 @@ class _AiAdviceList extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceVariant
+              color: Theme.of(context).colorScheme.surfaceVariant
                   .withOpacity(0.4),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.tips_and_updates,
-                    size: 18, color: Colors.amber),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    a,
-                    style: const TextStyle(fontSize: 13, height: 1.3),
-                  ),
-                ),
-              ],
+            child: Text(
+              a,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-        )
+        ),
       ],
     );
   }

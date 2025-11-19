@@ -12,6 +12,14 @@ class PinSetupSheet extends StatefulWidget {
 class _PinSetupSheetState extends State<PinSetupSheet> {
   final _pin1 = TextEditingController();
   final _pin2 = TextEditingController();
+  bool _enabled = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _enabled = widget.box.get('lockEnabled', defaultValue: false) as bool;
+  }
 
   @override
   void dispose() {
@@ -21,93 +29,109 @@ class _PinSetupSheetState extends State<PinSetupSheet> {
   }
 
   void _save() {
-    if (_pin1.text.length != 4 || _pin1.text != _pin2.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PIN mos kelmadi yoki xato kiritildi')),
-      );
+    if (!_enabled) {
+      widget.box
+        ..put('lockEnabled', false)
+        ..put('lockPin', '');
+      Navigator.of(context).pop();
       return;
     }
-    widget.box.put('lockPin', _pin1.text);
-    widget.box.put('lockEnabled', true);
-    Navigator.of(context).pop();
-  }
 
-  void _disable() {
-    widget.box.delete('lockPin');
-    widget.box.put('lockEnabled', false);
+    if (_pin1.text.length != 4 || _pin2.text.length != 4) {
+      setState(() {
+        _error = 'PIN 4 ta raqamdan iborat bo‘lishi kerak';
+      });
+      return;
+    }
+
+    if (_pin1.text != _pin2.text) {
+      setState(() {
+        _error = 'PINlar mos emas';
+      });
+      return;
+    }
+
+    widget.box
+      ..put('lockEnabled', true)
+      ..put('lockPin', _pin1.text);
+
     Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasPin =
-        (widget.box.get('lockPin') as String?)?.isNotEmpty == true;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 24),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  color: Colors.grey.withOpacity(0.4),
-                ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: Colors.grey.withOpacity(0.4),
               ),
-              Text(
-                hasPin ? 'PIN ni o‘zgartirish' : 'PIN o‘rnatish',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
+            ),
+            const Text(
+              'PIN / parol sozlamalari',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
-              const SizedBox(height: 12),
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              value: _enabled,
+              onChanged: (v) {
+                setState(() {
+                  _enabled = v;
+                  _error = null;
+                });
+              },
+              title: const Text('Ilovani PIN bilan bloklash'),
+              subtitle: const Text(
+                'Ilova ochilganda 4 xonali parol so‘ralsin',
+              ),
+            ),
+            if (_enabled) ...[
+              const SizedBox(height: 8),
               TextField(
                 controller: _pin1,
+                obscureText: true,
                 maxLength: 4,
                 keyboardType: TextInputType.number,
-                obscureText: true,
+                textAlign: TextAlign.center,
                 decoration: const InputDecoration(
-                  labelText: 'Yangi PIN',
+                  labelText: 'PIN kiriting',
                 ),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _pin2,
+                obscureText: true,
                 maxLength: 4,
                 keyboardType: TextInputType.number,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Yangi PIN (takror)',
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  labelText: 'PINni qayta kiriting',
+                  errorText: _error,
                 ),
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  if (hasPin)
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _disable,
-                        child: const Text('PINni o‘chirish'),
-                      ),
-                    ),
-                  if (hasPin) const SizedBox(width: 8),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _save,
-                      child: const Text('Saqlash'),
-                    ),
-                  ),
-                ],
-              ),
             ],
-          ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _save,
+                child: const Text('Saqlash'),
+              ),
+            ),
+          ],
         ),
       ),
     );
